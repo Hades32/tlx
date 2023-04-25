@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"io"
 	"log"
 	"net"
-	"crypto/tls"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -26,14 +29,16 @@ func main() {
 	}
 
 	// init the tls configs
-	config := tls.Config{Certificates: []tls.Certificate{cert}}
+	config := tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
 
 	// the listener
 	ln, err := tls.Listen("tcp", *flagListenAddr, &config)
 	if err != nil {
 		log.Fatalf("Listner: %s", err.Error())
 	}
-	
+
 	// let's play
 	for {
 		conn, err := ln.Accept()
@@ -47,15 +52,30 @@ func main() {
 // handle the incoming connection
 func handleConn(conn net.Conn) {
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(time.Minute))
 
-	client, err := net.Dial("tcp", *flagBackendAddr)
+	d := &net.Dialer{
+		Timeout: time.Second * 1,
+	}
+	client, err := d.Dial("tcp", *flagBackendAddr)
 	if err != nil {
-		log.Println("ConnectionError: ", err.Error())
+		log.Println("DialError: ", err.Error())
 		return
 	}
 	defer client.Close()
 
-	go io.Copy(conn, client)
-
-	io.Copy(client, conn)
+	eg := &errgroup.Group{}
+	eg.Go(func() error {
+		_, err := io.Copy(client, conn)
+		return err
+	})
+	eg.Go(func() error {
+		_, err := io.Copy(conn, client)
+		return err
+	})
+	err = eg.Wait()
+	if err != nil {
+		log.Println("ConnectionError: ", err.Error())
+		return
+	}
 }
