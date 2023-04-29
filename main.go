@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -67,11 +68,17 @@ func handleConn(conn net.Conn) {
 	eg := &errgroup.Group{}
 	eg.Go(func() error {
 		_, err := io.Copy(client, conn)
-		return err
+		if err != nil {
+			return err
+		}
+		return errors.New("server closed")
 	})
 	eg.Go(func() error {
 		_, err := io.Copy(conn, client)
-		return err
+		if err != nil {
+			return err
+		}
+		return errors.New("server closed")
 	})
 	err = eg.Wait()
 	if err != nil {
